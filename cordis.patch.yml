@@ -1,0 +1,23 @@
+# dsh-disk-cleanup 组合包补丁：把插件行插入 profile。
+# 本补丁按 id 覆盖；用户可在自己 profile 的 cordis.patch.yml 里覆盖本行整个 config。
+#
+# 示例（用户 profile 的 cordis.patch.yml）：
+#   - id: disk-cleanup
+#     name: 'dsh-disk-cleanup'
+#     config:
+#       enabled: true
+#       # scratchDir: ''            # 空 = 按权限模式推导
+#       redirectSystemTemp: true    # 系统临时目录里的写入改到 scratch
+#       redirectBareScripts: true   # 裸文件名脚本改到 scratch
+#       injectShellTemp: true       # pwsh/bash 的 TMP/TEMP 指向 scratch
+#       promptSection: true         # 往系统提示里加一句 scratch 说明
+#
+- insert:
+    - id: disk-cleanup
+      name: 'dsh-disk-cleanup'
+      config:
+        enabled: true
+        redirectSystemTemp: true
+        redirectBareScripts: true
+        injectShellTemp: true
+        promptSection: true

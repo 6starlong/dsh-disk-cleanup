@@ -3,10 +3,19 @@
  *
  * 需要 DSH 运行时：设 DSH_ASAR_ROOT。
  */
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { asarBase, repoUrl, recorder, tempDir } from './_helpers.mjs'
+
+const BASE = tempDir('write')
+const HOME = join(BASE, 'home')
+const WS = join(BASE, 'workspace')
+mkdirSync(WS, { recursive: true })
+mkdirSync(HOME, { recursive: true })
+// scratch 位置由 DSH_HOME 决定；测试把它指到临时目录，不碰真实缓存。
+process.env.DSH_HOME = HOME
+
+const SCRATCH = join(HOME, 'cache', 'scratch')
 
 const ASAR = asarBase()
 const { Context } = await import(ASAR + 'cordis/lib/index.js')
@@ -16,10 +25,6 @@ const ToolsService = (await import(ASAR + 'dsh-tools/lib/index.js')).default
 const LocalFileSystem = (await import(ASAR + 'dsh-fs-local/lib/index.js')).default
 const toolFs = await import(ASAR + 'dsh-tool-fs/lib/index.js')
 const { apply } = await import(repoUrl('lib/index.js'))
-
-const BASE = tempDir('write')
-const WS = join(BASE, 'workspace')
-mkdirSync(WS, { recursive: true })
 
 const { check, finish } = recorder()
 
@@ -41,7 +46,8 @@ toolFs.apply(ctx, {
   readLimit: 2000, readMaxLineLength: 2000, readMaxBytes: 51200, readStreamMinSize: 262144,
 })
 
-apply(ctx, undefined)
+// 这里不测权限补齐：LocalFileSystem 没有围栏，改访问控制列表反而污染临时目录。
+apply(ctx, { grantProcessWrite: false, runtimeCache: 'never' })
 const scope = createScope(ctx, {})
 const agent = { ctx: scope.ctx, session: { header: { cwd: WS } } }
 await ctx.emit('agent/created', { agent })
@@ -52,10 +58,10 @@ check('作用域里的 write 是包装后的', write !== undefined)
 
 const exec = { agent, callId: 'c1', name: 'write', arguments: {}, signal: new AbortController().signal }
 
-// 1) 裸脚本名 → 落到 cache/scratch
+// 1) 裸脚本名 → 落到 scratch
 const r1 = await write.execute({ file_path: 'probe.ps1', content: 'Write-Host hi' }, exec)
-const expected = join(WS, 'cache', 'scratch', 'probe.ps1')
-check('裸脚本名落到 cache/scratch', r1.path.toLowerCase() === expected.toLowerCase(), r1.path)
+const expected = join(SCRATCH, 'probe.ps1')
+check('裸脚本名落到 scratch', r1.path.toLowerCase() === expected.toLowerCase(), r1.path)
 check('文件真的存在', existsSync(expected))
 check('工作区根没有多出 probe.ps1', !existsSync(join(WS, 'probe.ps1')))
 
@@ -70,7 +76,7 @@ check('带目录相对路径留在工作区', existsSync(join(WS, 'src', 'main.t
 // 4) 连续两次写同一个裸脚本名 → 都落 scratch，不来回跳
 await write.execute({ file_path: 'keep.ps1', content: 'first' }, exec)
 const r4 = await write.execute({ file_path: 'keep.ps1', content: 'second' }, exec)
-check('同一裸脚本名两次写都落 scratch', r4.path.toLowerCase() === join(WS, 'cache', 'scratch', 'keep.ps1').toLowerCase(), r4.path)
+check('同一裸脚本名两次写都落 scratch', r4.path.toLowerCase() === join(SCRATCH, 'keep.ps1').toLowerCase(), r4.path)
 
 // 5) 工作区里已经存在的同名脚本不被搬走
 writeFileSync(join(WS, 'deploy.ps1'), '# 已有脚本\n')
@@ -81,7 +87,7 @@ check('原文件被原地更新', readFileSync(join(WS, 'deploy.ps1'), 'utf8') =
 // 6) 系统临时目录里的写入 → 搬到 scratch
 const sysTemp = join(process.env.TEMP ?? process.env.TMP ?? WS, 'dsh-e2e-probe.ps1')
 const r6 = await write.execute({ file_path: sysTemp, content: 'Write-Host tmp' }, exec)
-check('系统临时目录的写入搬到 scratch', r6.path.toLowerCase() === join(WS, 'cache', 'scratch', 'dsh-e2e-probe.ps1').toLowerCase(), r6.path)
+check('系统临时目录的写入搬到 scratch', r6.path.toLowerCase() === join(SCRATCH, 'dsh-e2e-probe.ps1').toLowerCase(), r6.path)
 
 // 7) scratch 里的内容可读回
 check('scratch 里的内容正确', readFileSync(expected, 'utf8') === 'Write-Host hi')

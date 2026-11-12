@@ -1,18 +1,33 @@
-import { test } from 'node:test'
+import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { join, resolve } from 'node:path'
-import { homedir } from 'node:os'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { scratchDirFor, dshHome, defaultTempRoots } from '../lib/scratch.js'
-import { injectShellTemp, envPrefix, alreadySetsTemp } from '../lib/shell-env.js'
+import { injectShellTemp, injectShellEnv, envPrefix, alreadySetsTemp, alreadySets } from '../lib/shell-env.js'
 import { resolveConfig, DEFAULT_CONFIG } from '../lib/config.js'
+import { probeRuntimes, managedRuntimes, runtimeCacheEnv, runtimeCacheDirs, findOnPath, RUNTIMES } from '../lib/runtimes.js'
 
-test('workspace-write 用工作区里的 cache/scratch', () => {
+const HOME = mkdtempSync(join(tmpdir(), 'dsh-disk-cleanup-scratch-'))
+after(() => rmSync(HOME, { recursive: true, force: true }))
+
+test('workspace-write 也用 DSH_HOME/cache/scratch', () => {
   const dir = scratchDirFor({ mode: 'workspace-write', workspaceRoot: 'C:\\ws' })
-  assert.equal(dir, join('C:\\ws', 'cache', 'scratch'))
+  assert.equal(dir, join(dshHome(), 'cache', 'scratch'))
 })
 
 test('danger-full-access 用 DSH_HOME/cache/scratch', () => {
   const dir = scratchDirFor({ mode: 'danger-full-access', workspaceRoot: 'C:\\ws' })
+  assert.equal(dir, join(dshHome(), 'cache', 'scratch'))
+})
+
+test('共享目录不可用时退到工作区里的 cache/scratch', () => {
+  const dir = scratchDirFor({ mode: 'workspace-write', workspaceRoot: 'C:\\ws', sharedCache: false })
+  assert.equal(dir, join('C:\\ws', 'cache', 'scratch'))
+})
+
+test('退路也缺工作区时仍用共享目录', () => {
+  const dir = scratchDirFor({ mode: 'workspace-write', sharedCache: false })
   assert.equal(dir, join(dshHome(), 'cache', 'scratch'))
 })
 
@@ -23,11 +38,6 @@ test('read-only 不启用', () => {
 test('显式配置优先于模式推导', () => {
   const dir = scratchDirFor({ mode: 'danger-full-access', workspaceRoot: 'C:\\ws', configured: 'D:\\scratch' })
   assert.equal(dir, 'D:\\scratch')
-})
-
-test('没有 workspaceRoot 时退到 DSH_HOME', () => {
-  const dir = scratchDirFor({ mode: 'workspace-write' })
-  assert.equal(dir, join(dshHome(), 'cache', 'scratch'))
 })
 
 test('dshHome 尊重 DSH_HOME 环境变量', () => {
@@ -65,14 +75,19 @@ test('pwsh 前缀注入 TMP 与 TEMP', () => {
 
 test('bash 前缀注入 TMPDIR/TMP/TEMP', () => {
   const out = injectShellTemp('bash', 'ls -la', '/tmp/scratch')
-  assert.equal(out, "export TMPDIR='/tmp/scratch' TMP='/tmp/scratch' TEMP='/tmp/scratch'; ls -la")
+  assert.equal(out, "export TMPDIR='/tmp/scratch'; export TMP='/tmp/scratch'; export TEMP='/tmp/scratch'; ls -la")
 })
 
-test('用户自己设了临时目录时不覆盖', () => {
+test('用户自己设过的临时目录变量不覆盖', () => {
   assert.equal(alreadySetsTemp('pwsh', '$env:TEMP = "D:\\t"; Get-ChildItem'), true)
   assert.equal(alreadySetsTemp('bash', 'export TMPDIR=/x; ls'), true)
-  const cmd = '$env:TEMP = "D:\\t"; Get-ChildItem'
-  assert.equal(injectShellTemp('pwsh', cmd, 'C:\\scratch'), cmd)
+  // 只设了 TEMP：TEMP 保持用户的值，TMP 仍补上。
+  const out = injectShellTemp('pwsh', '$env:TEMP = "D:\\t"; Get-ChildItem', 'C:\\scratch')
+  assert.equal(out.includes("$env:TEMP='C:\\scratch'"), false, out)
+  assert.ok(out.includes("$env:TMP='C:\\scratch'"), out)
+  // 两个都设了：一个都不补。
+  const both = '$env:TMP=\'D:\\a\'; $env:TEMP=\'D:\\b\'; Get-ChildItem'
+  assert.equal(injectShellTemp('pwsh', both, 'C:\\scratch'), both)
 })
 
 test('没有目录时原样返回', () => {
@@ -81,8 +96,24 @@ test('没有目录时原样返回', () => {
 })
 
 test('路径里的单引号被转义', () => {
-  const out = envPrefix('pwsh', "C:\\it's\\scratch")
-  assert.ok(out.includes("C:\\it''s\\scratch"))
+  const out = envPrefix('pwsh', [['TEMP', "C:\\it's\\scratch"]])
+  assert.ok(out.includes("C:\\it''s\\scratch"), out)
+})
+
+test('环境变量注入逐个跳过已设置的变量', () => {
+  const out = injectShellEnv('pwsh', '$env:UV_CACHE_DIR=\'D:\\u\'; uv sync', [
+    ['UV_CACHE_DIR', 'C:\\cache\\uv'],
+    ['BUN_INSTALL_CACHE_DIR', 'C:\\cache\\bun'],
+  ])
+  assert.ok(out.includes("BUN_INSTALL_CACHE_DIR='C:\\cache\\bun'"), out)
+  assert.equal(out.includes("UV_CACHE_DIR='C:\\cache\\uv'"), false, out)
+})
+
+test('alreadySets 按变量名精确匹配', () => {
+  assert.equal(alreadySets('pwsh', '$env:TEMPX = 1', 'TEMP'), false)
+  assert.equal(alreadySets('pwsh', '$env:TEMP = 1', 'TEMP'), true)
+  assert.equal(alreadySets('bash', 'export TEMP=/x; ls', 'TEMP'), true)
+  assert.equal(alreadySets('bash', 'echo TEMP', 'TEMP'), false)
 })
 
 test('resolveConfig 用默认值补齐并拒绝错类型', () => {
@@ -92,4 +123,57 @@ test('resolveConfig 用默认值补齐并拒绝错类型', () => {
   assert.equal(merged.scratchDir, 'D:\\s')
   assert.equal(merged.redirectSystemTemp, true)
   assert.deepEqual(merged.bareScriptExtensions, DEFAULT_CONFIG.bareScriptExtensions)
+})
+
+test('resolveConfig 只接受已知的 runtimeCache 取值', () => {
+  assert.equal(resolveConfig({ runtimeCache: 'always' }).runtimeCache, 'always')
+  assert.equal(resolveConfig({ runtimeCache: 'never' }).runtimeCache, 'never')
+  assert.equal(resolveConfig({ runtimeCache: 'sometimes' }).runtimeCache, 'auto')
+})
+
+test('findOnPath 只在 PATH 里找可执行文件', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-disk-cleanup-path-'))
+  try {
+    const name = process.platform === 'win32' ? 'probe-tool.CMD' : 'probe-tool'
+    writeFileSync(join(dir, name), '')
+    const env = { PATH: dir }
+    assert.equal(findOnPath('probe-tool', env), join(dir, name))
+    assert.equal(findOnPath('no-such-tool', env), undefined)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('probeRuntimes 对每个受管条目都给出结论', () => {
+  const probes = probeRuntimes(process.env)
+  for (const runtime of RUNTIMES) {
+    assert.equal(typeof probes[runtime.name].present, 'boolean', runtime.name)
+  }
+})
+
+test('runtimeCache=auto 只接管没装的', () => {
+  const probes = { pnpm: { present: true }, bun: { present: false }, uv: { present: false }, npm: { present: true } }
+  const managed = managedRuntimes('auto', probes).map(r => r.name)
+  assert.deepEqual(managed, ['bun', 'uv'])
+})
+
+test('runtimeCache=always 全接管，never 一个都不碰', () => {
+  const probes = { pnpm: { present: true }, bun: { present: true }, uv: { present: true }, npm: { present: true } }
+  assert.equal(managedRuntimes('always', probes).length, RUNTIMES.length)
+  assert.equal(managedRuntimes('never', probes).length, 0)
+})
+
+test('缓存环境变量指向缓存根下的独立子目录', () => {
+  const managed = RUNTIMES.filter(r => r.name === 'pnpm' || r.name === 'uv')
+  const env = runtimeCacheEnv('C:\\cache', managed)
+  assert.equal(env.pnpm_config_store_dir, join('C:\\cache', 'pnpm', 'store'))
+  assert.equal(env.UV_CACHE_DIR, join('C:\\cache', 'uv', 'cache'))
+  assert.equal(env.BUN_INSTALL_CACHE_DIR, undefined)
+})
+
+test('缓存目录清单与注入的变量一一对应', () => {
+  const managed = RUNTIMES.filter(r => r.name === 'pnpm')
+  const dirs = runtimeCacheDirs('C:\\cache', managed)
+  const values = Object.values(runtimeCacheEnv('C:\\cache', managed))
+  assert.deepEqual(dirs.slice().sort(), values.slice().sort())
 })

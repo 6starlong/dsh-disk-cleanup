@@ -7,6 +7,16 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { asarBase, repoUrl, recorder, tempDir } from './_helpers.mjs'
 
+const BASE = tempDir('edit')
+const HOME = join(BASE, 'home')
+const WS = join(BASE, 'workspace')
+mkdirSync(WS, { recursive: true })
+mkdirSync(HOME, { recursive: true })
+// scratch 位置由 DSH_HOME 决定；测试把它指到临时目录，不碰真实缓存。
+process.env.DSH_HOME = HOME
+
+const SCRATCH = join(HOME, 'cache', 'scratch')
+
 const ASAR = asarBase()
 const { Context } = await import(ASAR + 'cordis/lib/index.js')
 const { scopeOf, createScope } = await import(ASAR + 'dsh-scope/lib/index.js')
@@ -15,10 +25,6 @@ const ToolsService = (await import(ASAR + 'dsh-tools/lib/index.js')).default
 const LocalFileSystem = (await import(ASAR + 'dsh-fs-local/lib/index.js')).default
 const toolFs = await import(ASAR + 'dsh-tool-fs/lib/index.js')
 const { apply } = await import(repoUrl('lib/index.js'))
-
-const BASE = tempDir('edit')
-const WS = join(BASE, 'workspace')
-mkdirSync(WS, { recursive: true })
 
 const { check, finish } = recorder()
 
@@ -38,7 +44,7 @@ toolFs.apply(ctx, {
   readLimit: 2000, readMaxLineLength: 2000, readMaxBytes: 51200, readStreamMinSize: 262144,
 })
 
-apply(ctx, undefined)
+apply(ctx, { grantProcessWrite: false, runtimeCache: 'never' })
 
 const scope = createScope(ctx, {})
 const agent = { ctx: scope.ctx, session: { header: { cwd: WS } } }
@@ -51,8 +57,6 @@ const patch = ctx.tools.get('apply_patch', key)
 check('三个包装都装上了', write !== undefined && edit !== undefined && patch !== undefined,
   [write, edit, patch].map(x => x === undefined ? 'missing' : 'ok').join(','))
 const exec = { callId: 'c1', name: 'write', arguments: {}, agent, signal: new AbortController().signal }
-
-const SCRATCH = join(WS, 'cache', 'scratch')
 
 // 1) 先用 write 把脚本放进 scratch，再 edit 同一个裸名 → 改 scratch 那份
 await write.execute({ file_path: 'probe.ps1', content: 'Write-Host one\n' }, exec)
@@ -81,4 +85,5 @@ check('apply_patch 普通文件落工作区', existsSync(join(WS, 'src', 'notes.
 check('全局 write 未被改动', ctx.tools.get('write').execute !== write.execute)
 
 finish()
+await scope.dispose()
 rmSync(BASE, { recursive: true, force: true })

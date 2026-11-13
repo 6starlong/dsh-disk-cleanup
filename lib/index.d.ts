@@ -17,12 +17,18 @@ export interface Config {
   runtimeCache?: RuntimeCachePolicy
   /** 往系统提示里加一段说明。默认 true。 */
   promptSection?: boolean
+  /** 启动时清掉 scratch 里过期的临时文件。默认 true。 */
+  autoCleanup?: boolean
+  /** 保留天数，范围 1–365。默认 7。 */
+  cleanupMaxAgeDays?: number
 }
 
 /** Cordis 插件身份。 */
 export declare const name: string
 /** 必需服务。 */
 export declare const inject: readonly string[]
+/** 配置 schema：宿主用它渲染设置页表单。 */
+export declare const Config: unknown
 /**
  * 插件入口。
  * @param ctx - 宿主上下文。

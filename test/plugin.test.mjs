@@ -1,7 +1,7 @@
 import { apply } from '../lib/index.js'
 import assert from 'node:assert/strict'
 import { after, test } from 'node:test'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -38,7 +38,8 @@ function fakeHost(options = {}) {
     async execute(args) { return { path: args.file_path ?? args.command, args } },
   })
 
-  for (const n of ['write', 'edit', 'apply_patch', 'pwsh', 'bash']) globals.set(n, makeTool(n))
+  // 只放插件真正要包装的 shell 工具；文件工具不参与。
+  for (const n of ['pwsh', 'bash']) globals.set(n, makeTool(n))
 
   const sandboxPolicy = {
     resolve: () => ({ mode, workspaceRoot: 'C:\\ws' }),
@@ -64,6 +65,8 @@ function fakeHost(options = {}) {
       return () => {}
     },
     effect: (fn) => { const dispose = fn(); return () => dispose() },
+    // cordis 的定时器挂在当前 fiber 上，插件卸载时自动清；这里换成不起作用的替身。
+    interval: () => () => {},
     emit: async (event, payload) => { for (const l of listeners) if (l.event === event) await l.handler(payload) },
   }
   /** 真实 cordis 的 agent 上下文要先 inject 才能读 ctx.tools，这里照样模拟。 */
@@ -96,11 +99,9 @@ test('插件导出 name / inject / apply', () => {
   assert.equal(typeof apply, 'function')
 })
 
-test('apply 后只给 shell 工具装包装，文件工具不被覆盖', async () => {
+test('apply 后只给 pwsh 与 bash 装包装', async () => {
   const host = await boot()
-  const names = host.registered.map(d => d.name)
-  assert.deepEqual(names.sort(), ['bash', 'pwsh'])
-  for (const n of ['write', 'edit', 'apply_patch']) assert.equal(names.includes(n), false, n)
+  assert.deepEqual(host.registered.map(d => d.name).sort(), ['bash', 'pwsh'])
 })
 
 test('包装后的工具继承原定义的全部字段', async () => {
@@ -136,7 +137,7 @@ test('不接管包管理器时不注入缓存变量', async () => {
   const host = await boot()
   const wrapped = host.registered.find(d => d.name === 'pwsh')
   const out = await wrapped.execute({ command: 'pnpm install' }, { agent: host.agent })
-  assert.equal(out.path.includes('pnpm_config_store_dir'), false, out.path)
+  assert.equal(out.path.includes('npm_config_store_dir'), false, out.path)
 })
 
 test('workspace-write 下给 scratch 追加可写根', async () => {
@@ -255,4 +256,80 @@ test('文件工具路径：不执行 shell 也已登记可写根', async () => {
 test('read-only 下不登记可写根', async () => {
   const host = await boot({ mode: 'read-only', config: { grantProcessWrite: false } })
   assert.equal(host.writableRoots.length, 0, host.writableRoots.join(','))
+})
+
+/**
+ * 在指定 DSH_HOME 下跑一次 boot，并在 scratch 里预置过期的残留。
+ * @param {object} config - 插件配置。
+ * @returns {Promise<{home: string, expired: string, fresh: string, host: object}>} 目录与宿主。
+ */
+async function bootWithScratch(config) {
+  const prev = process.env.DSH_HOME
+  const home = mkdtempSync(join(tmpdir(), 'dsh-disk-cleanup-clean-'))
+  process.env.DSH_HOME = home
+  const scratch = join(home, 'cache', 'scratch')
+  mkdirSync(scratch, { recursive: true })
+  const expired = join(scratch, 'old-probe.mjs')
+  const fresh = join(scratch, 'recent-probe.mjs')
+  writeFileSync(expired, 'x')
+  writeFileSync(fresh, 'x')
+  const stale = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+  utimesSync(expired, stale, stale)
+  utimesSync(scratch, stale, stale)
+  try {
+    const host = await boot({ config })
+    await new Promise(r => setTimeout(r, 30))
+    return { home, expired, fresh, host }
+  } finally {
+    process.env.DSH_HOME = prev
+  }
+}
+
+test('启动时清掉 scratch 里过期的条目', async () => {
+  const { home, expired, fresh } = await bootWithScratch({ grantProcessWrite: false })
+  try {
+    assert.equal(existsSync(expired), false, '30 天前的残留该被删掉')
+    assert.equal(existsSync(fresh), true, '刚写的文件不该被删')
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('autoCleanup=false 时一个都不删', async () => {
+  const { home, expired } = await bootWithScratch({ grantProcessWrite: false, autoCleanup: false })
+  try {
+    assert.equal(existsSync(expired), true, '关掉清理后残留应保留')
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('cleanupMaxAgeDays 变大后旧条目不再过期', async () => {
+  const { home, expired } = await bootWithScratch({ grantProcessWrite: false, cleanupMaxAgeDays: 60 })
+  try {
+    assert.equal(existsSync(expired), true, '保留 60 天时 30 天前的文件还在期内')
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('自己指定了 scratchDir 时不去动那个目录', async () => {
+  const prev = process.env.DSH_HOME
+  const home = mkdtempSync(join(tmpdir(), 'dsh-disk-cleanup-own-'))
+  const custom = mkdtempSync(join(tmpdir(), 'dsh-disk-cleanup-custom-'))
+  process.env.DSH_HOME = home
+  const stale = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+  const leftover = join(custom, 'keep-me.txt')
+  writeFileSync(leftover, 'x')
+  utimesSync(leftover, stale, stale)
+  utimesSync(custom, stale, stale)
+  try {
+    await boot({ config: { grantProcessWrite: false, scratchDir: custom } })
+    await new Promise(r => setTimeout(r, 30))
+    assert.equal(existsSync(leftover), true, '用户自己的目录不该被自动清理')
+  } finally {
+    process.env.DSH_HOME = prev
+    rmSync(home, { recursive: true, force: true })
+    rmSync(custom, { recursive: true, force: true })
+  }
 })

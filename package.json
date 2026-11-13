@@ -1,7 +1,7 @@
 {
   "name": "dsh-disk-cleanup",
   "version": "0.1.0",
-  "description": "为 shell 命令注入临时目录与依赖缓存变量，给 scratch 目录补齐写权限，并在系统提示里点明临时文件该写哪里。",
+  "description": "为 shell 命令注入临时目录与依赖缓存变量，给 scratch 目录补齐写权限，在系统提示里点明临时文件该写哪里，并清理过期的临时文件。",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -9,6 +9,9 @@
     ".": {
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
@@ -18,13 +21,40 @@
     "cordis.patch.yml",
     "README.md"
   ],
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
+  },
   "scripts": {
+    "build": "node scripts/build.mjs",
     "test": "node --test \"test/*.test.mjs\"",
     "test:e2e": "node test/e2e-shell.mjs"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.1.0",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.2.2-rc.3",
+    "@deepseek-ai/schemastery": "*"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-primitives": {
+      "optional": true
+    },
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
   },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "dsh-client-ui-primitives"
+      ],
+      "platform": "web"
     }
   },
   "keywords": [
@@ -32,7 +62,8 @@
     "deepseek-harness",
     "plugin",
     "scratch",
-    "temp"
+    "temp",
+    "cleanup"
   ],
   "license": "MIT",
   "engines": {

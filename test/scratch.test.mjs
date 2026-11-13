@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { scratchDirFor, dshHome, defaultTempRoots } from '../lib/scratch.js'
+import { scratchDirFor, dshHome } from '../lib/scratch.js'
 import { injectShellTemp, injectShellEnv, envPrefix, alreadySetsTemp, alreadySets } from '../lib/shell-env.js'
 import { resolveConfig, DEFAULT_CONFIG } from '../lib/config.js'
 import { probeRuntimes, managedRuntimes, runtimeCacheEnv, runtimeCacheDirs, findOnPath, RUNTIMES } from '../lib/runtimes.js'
@@ -59,12 +59,6 @@ test('dshHome 缺省是 ~/.dsh', () => {
   } finally {
     if (saved !== undefined) process.env.DSH_HOME = saved
   }
-})
-
-test('defaultTempRoots 去重且非空', () => {
-  const roots = defaultTempRoots()
-  assert.ok(roots.length > 0)
-  assert.equal(new Set(roots).size, roots.length)
 })
 
 test('pwsh 前缀注入 TMP 与 TEMP', () => {
@@ -123,6 +117,18 @@ test('resolveConfig 用默认值补齐并拒绝错类型', () => {
   assert.equal(merged.scratchDir, 'X')
   assert.equal(merged.injectShellTemp, true)
   assert.equal(merged.promptSection, DEFAULT_CONFIG.promptSection)
+})
+
+test('resolveConfig 把保留天数夹到合法范围', () => {
+  assert.equal(resolveConfig(undefined).cleanupMaxAgeDays, 7)
+  assert.equal(resolveConfig({ cleanupMaxAgeDays: 0 }).cleanupMaxAgeDays, 1)
+  assert.equal(resolveConfig({ cleanupMaxAgeDays: 9999 }).cleanupMaxAgeDays, 365)
+  assert.equal(resolveConfig({ cleanupMaxAgeDays: 3.6 }).cleanupMaxAgeDays, 4)
+  // 手写 YAML 里的 "7" 与设置页写回的 7 一样管用。
+  assert.equal(resolveConfig({ cleanupMaxAgeDays: '7' }).cleanupMaxAgeDays, 7)
+  assert.equal(resolveConfig({ cleanupMaxAgeDays: ' 30 ' }).cleanupMaxAgeDays, 30)
+  assert.equal(resolveConfig({ cleanupMaxAgeDays: 'abc' }).cleanupMaxAgeDays, 7)
+  assert.equal(resolveConfig({ autoCleanup: 'yes' }).autoCleanup, true)
 })
 
 test('resolveConfig 只接受已知的 runtimeCache 取值', () => {

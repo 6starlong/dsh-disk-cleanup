@@ -7,8 +7,6 @@
 #     config:
 #       enabled: true
 #       # scratchDir: ''            # 空 = 用 <DSH_HOME>/cache/scratch
-#       redirectSystemTemp: true    # 系统临时目录里的写入改到 scratch
-#       redirectBareScripts: true   # 裸文件名脚本改到 scratch
 #       injectShellTemp: true       # pwsh/bash 的 TMP/TEMP 指向 scratch
 #       grantProcessWrite: true     # 给 scratch 补访问控制项，让子进程也能写
 #       runtimeCache: auto          # auto / always / never
@@ -19,8 +17,6 @@
       name: 'dsh-disk-cleanup'
       config:
         enabled: true
-        redirectSystemTemp: true
-        redirectBareScripts: true
         injectShellTemp: true
         grantProcessWrite: true
         runtimeCache: auto

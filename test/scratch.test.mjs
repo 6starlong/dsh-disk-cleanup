@@ -1,6 +1,6 @@
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { scratchDirFor, dshHome, defaultTempRoots } from '../lib/scratch.js'
@@ -118,11 +118,11 @@ test('alreadySets 按变量名精确匹配', () => {
 
 test('resolveConfig 用默认值补齐并拒绝错类型', () => {
   assert.deepEqual(resolveConfig(undefined), DEFAULT_CONFIG)
-  const merged = resolveConfig({ enabled: false, scratchDir: '  D:\\s  ', redirectSystemTemp: 'yes', bareScriptExtensions: [] })
+  const merged = resolveConfig({ enabled: false, scratchDir: '  X  ', injectShellTemp: 'yes' })
   assert.equal(merged.enabled, false)
-  assert.equal(merged.scratchDir, 'D:\\s')
-  assert.equal(merged.redirectSystemTemp, true)
-  assert.deepEqual(merged.bareScriptExtensions, DEFAULT_CONFIG.bareScriptExtensions)
+  assert.equal(merged.scratchDir, 'X')
+  assert.equal(merged.injectShellTemp, true)
+  assert.equal(merged.promptSection, DEFAULT_CONFIG.promptSection)
 })
 
 test('resolveConfig 只接受已知的 runtimeCache 取值', () => {
@@ -148,13 +148,39 @@ test('probeRuntimes 对每个受管条目都给出结论', () => {
   const probes = probeRuntimes(process.env)
   for (const runtime of RUNTIMES) {
     assert.equal(typeof probes[runtime.name].present, 'boolean', runtime.name)
+    assert.equal(typeof probes[runtime.name].hasCache, 'boolean', runtime.name)
   }
 })
 
-test('runtimeCache=auto 只接管没装的', () => {
-  const probes = { pnpm: { present: true }, bun: { present: false }, uv: { present: false }, npm: { present: true } }
+test('设了缓存环境变量就算用户已有缓存', () => {
+  const probes = probeRuntimes({ PATH: '', UV_CACHE_DIR: 'D:\\my-uv-cache' })
+  assert.equal(probes.uv.hasCache, true)
+  assert.equal(probes.uv.present, false)
+  assert.equal(probes.uv.cachePath, 'D:\\my-uv-cache')
+})
+
+test('默认缓存目录存在也算用户已有缓存', () => {
+  const local = mkdtempSync(join(tmpdir(), 'dsh-disk-cleanup-cache-home-'))
+  try {
+    mkdirSync(join(local, 'npm-cache'), { recursive: true })
+    const probes = probeRuntimes({ PATH: '', LOCALAPPDATA: local })
+    assert.equal(probes.npm.hasCache, true)
+    assert.equal(probes.pnpm.hasCache, false)
+  } finally {
+    rmSync(local, { recursive: true, force: true })
+  }
+})
+
+test('runtimeCache=auto 只接管没有现成缓存的', () => {
+  const probes = { pnpm: { hasCache: true }, bun: { hasCache: false }, uv: { hasCache: false }, npm: { hasCache: true } }
   const managed = managedRuntimes('auto', probes).map(r => r.name)
   assert.deepEqual(managed, ['bun', 'uv'])
+})
+
+test('命令在 PATH 上但没有缓存时仍然接管', () => {
+  const probes = { pnpm: { present: true, hasCache: false } }
+  const managed = managedRuntimes('auto', probes).map(r => r.name)
+  assert.ok(managed.includes('pnpm'), managed.join(','))
 })
 
 test('runtimeCache=always 全接管，never 一个都不碰', () => {
@@ -166,7 +192,7 @@ test('runtimeCache=always 全接管，never 一个都不碰', () => {
 test('缓存环境变量指向缓存根下的独立子目录', () => {
   const managed = RUNTIMES.filter(r => r.name === 'pnpm' || r.name === 'uv')
   const env = runtimeCacheEnv('C:\\cache', managed)
-  assert.equal(env.pnpm_config_store_dir, join('C:\\cache', 'pnpm', 'store'))
+  assert.equal(env.npm_config_store_dir, join('C:\\cache', 'pnpm', 'store'))
   assert.equal(env.UV_CACHE_DIR, join('C:\\cache', 'uv', 'cache'))
   assert.equal(env.BUN_INSTALL_CACHE_DIR, undefined)
 })

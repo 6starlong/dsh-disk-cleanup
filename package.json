@@ -1,7 +1,7 @@
 {
   "name": "dsh-disk-cleanup",
   "version": "0.1.0",
-  "description": "把模型写的临时文件（探针脚本、草稿）收进专门的 scratch 目录，用户要保留的文件留在工作区。",
+  "description": "为 shell 命令注入临时目录与依赖缓存变量，给 scratch 目录补齐写权限，并在系统提示里点明临时文件该写哪里。",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -19,7 +19,8 @@
     "README.md"
   ],
   "scripts": {
-    "test": "node --test \"test/*.test.mjs\""
+    "test": "node --test \"test/*.test.mjs\"",
+    "test:e2e": "node test/e2e-shell.mjs"
   },
   "dsh": {
     "bundle": {

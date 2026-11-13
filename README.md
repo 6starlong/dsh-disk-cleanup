@@ -1,21 +1,20 @@
 # dsh-disk-cleanup
 
-把模型写的临时文件（探针脚本、一次性检查、草稿）收进专门的 scratch 目录，用户要保留的文件照旧留在工作区。
+给临时文件一个专用目录：shell 命令里的临时目录与包管理器缓存默认落在工作区之外，scratch 目录在需要时补齐写权限，系统提示告诉模型临时文件该写哪里。用户要保留的文件照旧留在工作区。
 
-DSH 本身没有「临时文件目录」这个概念：所有 `.ps1` / `.js` 探针都是模型自己用 `write` 写出来的，默认直接落在工作区根目录。包管理器（pnpm / bun / uv / npm）也会把动辄上百 MB 的依赖缓存建在工作区里。这个插件补上那一层。
+DSH 本身没有「临时文件目录」这个概念；模型写出的探针脚本、包管理器建出的依赖缓存默认都落在工作区内。这个插件提供统一的环境注入、scratch 目录授权和一段系统提示，让临时文件有地方可去，用户文件留在工作区。
 
 ## 它做什么
 
-四条机制：
+三条机制：
 
 | 机制 | 覆盖的情况 | 做法 |
 |---|---|---|
-| 文件工具覆盖 | 模型直接 `write` / `edit` / `apply_patch` 一个裸脚本名 | 在 agent 作用域注册同名工具，改写 `file_path` 后调用原实现，返回给模型的 path 就是真实落点 |
-| shell 环境注入 | 脚本内部用 `tempfile` / `[System.IO.Path]::GetTempPath()` 之类 | 在 `pwsh` / `bash` 命令串前设置 `TMP` / `TEMP` / `TMPDIR` |
-| 运行时缓存改道 | `pnpm install` / `bun install` / `uv sync` 在工作区留下 `.pnpm-store`、`_buninstall` 之类 | 启动时探测本机装了哪些包管理器，只接管没装的那几个，把缓存目录注入成 `<DSH_HOME>/cache/<工具>` |
-| 系统提示 | 模型不知道该往哪写 | 加一段说明，讲清临时文件与用户文件的落点区别 |
+| shell 环境注入 | 脚本内部用 `tempfile` / `[System.IO.Path]::GetTempPath()` 之类，以及 `pnpm install` / `bun install` / `uv sync` 在工作区留下缓存 | 在 `pwsh` / `bash` 命令串前设置 `TMP` / `TEMP` / `TMPDIR`，并注入包管理器缓存变量，缓存一律进 `<DSH_HOME>/cache/<工具>` |
+| 权限补齐 | workspace-write 下 scratch 目录对受限子进程不可写 | 给会话注册可写根 + 给目录补访问控制项 |
+| 系统提示 | 模型不知道该往哪写 | 加一段祈使句，点明 scratch 位置、临时文件写那儿、用户文件留在工作区；路径每次构建时现算，只读会话不出这段 |
 
-改写落点而不是拒绝调用：模型拿到的 path 就是真实位置，不需要重试，也不消耗额外轮次。
+不改写任何工具入参的路径：模型给什么路径就写什么路径。要不要把临时文件放进 scratch 由提示词引导，不由插件替模型决定。
 
 ## 落点规则
 
@@ -27,28 +26,13 @@ DSH 本身没有「临时文件目录」这个概念：所有 `.ps1` / `.js` 探
 
 `<DSH_HOME>` 默认 `~/.dsh`，跟随 `DSH_HOME` 环境变量。**所有可写模式都用同一个位置**，工作区只留用户要的文件。
 
-workspace-write 下写到工作区外面需要两步授权，插件在**第一次真正要写入时**自动完成（不是会话创建时——那一刻权限还没落定，提前算会把文件送进错的目录）：
+workspace-write 下写到工作区外面需要两步授权，插件在会话创建时（`agent/created`，此时权限模式已确定）就完成：
 
-1. `sandboxPolicy.registerWritableRoot(session, dir)` —— 让 `write` / `edit` / `apply_patch` 认这个目录。
+1. `sandboxPolicy.registerWritableRoot(session, dir)` —— 让文件工具能写这个目录。
 2. `AclWriteGrant`（Windows）—— 用工作区自己的安全标识给目录加一条可写项，受限子进程也能写。
 
-第 2 步只在 Windows 上做，且复用工作区的安全标识，所以不需要新身份、也不会放宽到别的目录。任何一步失败就整体退到 `<工作区>/cache/scratch`，不弹审批、不静默失败。
+第 2 步只在 Windows 上做，且复用工作区的安全标识，所以不需要新身份、也不会放宽到别的目录。加在目录上的访问控制项是 **standing（常驻）** 的，和 DSH 自己处理可写目录一致：插件卸载时只释放授权对象，不删这条访问控制项，否则下一个会话写 scratch 会被挡回去。任何一步失败就整体退到 `<工作区>/cache/scratch`，不弹审批、不静默失败。
 
-## 判据：只动两类，其余一律不碰
-
-1. **系统临时目录内的绝对路径** → 改到 scratch。
-2. **裸文件名 + 脚本扩展名** → 改到 scratch。扩展名：`.ps1 .sh .bash .bat .cmd .py .js .mjs .cjs .ts .rb .pl .lua`
-
-以下**永远不动**：
-
-- 带目录的相对路径（`src/main.js`、`cache/scratch/x.ps1`、`.scratch/y.py`）
-- 产物类扩展名（`report.md`、`data.json`、`notes.txt`、`out.csv`）
-- 项目入口名（`server.js`、`main.py`、`vite.config.ts`、`index.mjs` 等）
-- 工作区内的绝对路径
-- 工作区里已经存在的同名文件（`write` 时）
-- scratch 里已经存在的同名文件（`edit` 时优先改那一份）
-
-不读文件内容，不按 `_` 前缀猜——判据是纯函数，见 `lib/redirect.js`。
 
 ## 运行时缓存
 
@@ -56,20 +40,24 @@ workspace-write 下写到工作区外面需要两步授权，插件在**第一�
 
 | 取值 | 行为 |
 |---|---|
-| `auto`（默认） | 只接管**没装**的。用户自己装了并配好全局缓存的，用他自己的，不打扰 |
+| `auto`（默认） | 只接管**没有现成缓存**的。用户已经有自己缓存位置的，用他自己的，不打扰 |
 | `always` | 全部接管，缓存一律进 `<DSH_HOME>/cache` |
 | `never` | 一个都不碰 |
 
+`auto` 判的是「用户有没有现成的缓存」，不是「命令在不在 PATH 上」：缓存环境变量已经设了，或者该工具的默认缓存目录已经存在，就算用户有。命令在 PATH 上但一个缓存都没有时仍然接管——我们给的位置就是它第一次写缓存的地方。
+
 接管的工具会被注入这些变量：
 
-| 工具 | 变量 |
-|---|---|
-| pnpm | `pnpm_config_store_dir` / `pnpm_config_cache_dir` / `pnpm_config_state_dir` |
-| bun | `BUN_INSTALL_CACHE_DIR` |
-| uv | `UV_CACHE_DIR` |
-| npm | `npm_config_cache` |
+| 工具 | 变量 | 判默认位置 |
+|---|---|---|
+| pnpm | `npm_config_store_dir` / `npm_config_cache_dir` / `npm_config_state_dir` | `%LOCALAPPDATA%\pnpm\store` |
+| bun | `BUN_INSTALL_CACHE_DIR` | `~/.bun/install/cache` |
+| uv | `UV_CACHE_DIR` | `%LOCALAPPDATA%\uv\cache` |
+| npm | `npm_config_cache` | `%LOCALAPPDATA%\npm-cache` |
 
-命令里已经自己设过同名变量的不覆盖。项目自己的 `node_modules` 不接管——那是项目产物，属于工作区。
+pnpm 用的是 `npm_config_` 前缀：npm 系工具（npm / pnpm / bun）认的都是这一套，`pnpm_config_` 是无效前缀。命令里已经自己设过同名变量的不覆盖。
+
+项目自己的 `node_modules` 不接管——那是项目产物，属于工作区。同理，Python 项目的 `.venv`、Rust 的 `target`、各类 `__pycache__` 也一概不碰：插件只改包管理器的**全局缓存位置**，不动项目内的任何目录。
 
 ## 安装
 
@@ -89,9 +77,6 @@ dsh plugin --profile <profile> add "link:<本仓库绝对路径>"
   config:
     enabled: true
     scratchDir: ''              # 空 = 用 <DSH_HOME>/cache/scratch
-    redirectSystemTemp: true    # 系统临时目录里的写入改到 scratch
-    redirectBareScripts: true   # 裸文件名脚本改到 scratch
-    bareScriptExtensions: []    # 空 = 用内置集合
     injectShellTemp: true       # pwsh/bash 的 TMP/TEMP 指向 scratch
     grantProcessWrite: true     # 给 scratch 补访问控制项，让子进程也能写
     runtimeCache: auto          # auto / always / never
@@ -100,26 +85,15 @@ dsh plugin --profile <profile> add "link:<本仓库绝对路径>"
 
 ## 测试
 
-纯函数与插件装配的单测不需要 DSH 运行时：
+都不需要 DSH 运行时：
 
 ```powershell
 node --test "test/*.test.mjs"
-```
-
-端到端测试要加载 DSH 运行时里的模块，用环境变量指向安装位置：
-
-```powershell
-$env:DSH_ASAR_ROOT = '<安装目录>/resources/app.asar/dsh/node_modules/@deepseek-ai/'
-node test/integration.mjs
-node test/e2e-write.mjs
-node test/e2e-edit.mjs
 node test/e2e-shell.mjs
 ```
 
-- `integration`：真实 cordis + ToolsService + SystemPromptService，验证同名覆盖在真实注册校验下成立。
-- `e2e-write`：真实 LocalFileSystem + 真实 write 工具，真写文件。
-- `e2e-edit`：edit 与 apply_patch 的重定向。
-- `e2e-shell`：生成的前缀真的交给 pwsh 执行。
+- `plugin` / `scratch`：插件装配与纯函数，覆盖 shell 包装、环境变量注入、可写根登记、提示词 section。
+- `e2e-shell`：生成的前缀真的交给 pwsh 执行，确认 TMP/TEMP 落到 scratch。
 
 ## 加载顺序与重入
 
@@ -130,14 +104,13 @@ node test/e2e-shell.mjs
 
 ## 边界
 
-- 拿不到 `sandboxPolicy` 服务，或当前会话是 read-only → 完全不动：不重定向、不注入、不建目录。
+- 拿不到 `sandboxPolicy` 服务，或当前会话是 read-only → 完全不动：不注入、不建目录。
 - 可写根或访问控制项补不上 → 整体退到 `<工作区>/cache/scratch`，不混用两处。
-- 非 Windows 平台 → 跳过访问控制项那一步；文件工具那半仍然生效。
+- 非 Windows 平台 → 跳过访问控制项那一步；可写根注册那半仍然生效。
 - 原工具被别的插件关掉 → 跳过该工具，其余照常。
 - 原 `execute` 抛错 → 原样透传，不包装、不吞异常。
 - `run_code` 不覆盖（工具名被宿主保留，注册会抛错），也不在覆盖范围内。
-- 写 scratch 失败 → 抛原始错误，不静默回退到工作区。
-- 挂载插件本身不产生任何磁盘写入，只有真正调用了被包装的工具才会建目录。
+- 挂载后会话一建立就会建 scratch 目录（`agent/created` 时一次性建好），不等第一次写文件。
 - `sandbox_permissions` / `justification` 原样透传，权限升级链路不断。
 
 ## 尚未包含

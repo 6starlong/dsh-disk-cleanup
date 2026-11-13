@@ -1,14 +1,9 @@
 /**
  * 测试用的小工具：路径解析与临时目录。
- *
- * 端到端测试要加载 DSH 运行时里的模块，那个位置随安装方式变化，
- * 所以由环境变量 DSH_ASAR_ROOT 指定（指向安装目录下的
- * resources/app.asar/dsh/node_modules/@deepseek-ai/）。
  */
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 
 /** 仓库根目录。 */
 export const REPO_ROOT = new URL('../', import.meta.url)
@@ -20,20 +15,6 @@ export const REPO_ROOT = new URL('../', import.meta.url)
  */
 export function repoUrl(relative) {
   return new URL(relative, REPO_ROOT).href
-}
-
-/**
- * DSH 运行时模块的 URL 前缀。
- * @returns {string} 以斜杠结尾的 file:// URL。
- */
-export function asarBase() {
-  const root = process.env.DSH_ASAR_ROOT
-  if (typeof root !== 'string' || root.trim() === '') {
-    throw new Error('set DSH_ASAR_ROOT to <install>/resources/app.asar/dsh/node_modules/@deepseek-ai/')
-  }
-  let dir = root.trim().replace(/\\/g, '/')
-  if (!dir.endsWith('/')) dir += '/'
-  return pathToFileURL(dir).href
 }
 
 /**

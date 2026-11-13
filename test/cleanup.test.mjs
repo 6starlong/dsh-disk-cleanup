@@ -82,9 +82,11 @@ test('目录不存在时返回全零，不抛错', async () => {
 
 test('保留期边界：正好在分界线上的不删', async () => {
   const dir = fixture('edge', { exact: 0 })
-  const mtime = Date.now() - 7 * DAY
+  // 参照时刻与文件时间取同一个值：分两次读 Date.now() 会差几毫秒，条目就落到分界线之外。
+  const now = Date.now()
+  const mtime = now - 7 * DAY
   utimesSync(join(dir, 'exact'), new Date(mtime), new Date(mtime))
-  const result = await cleanScratch({ dir, maxAgeDays: 7, now: Date.now() })
+  const result = await cleanScratch({ dir, maxAgeDays: 7, now })
   assert.equal(result.removed, 0, '条目时间等于分界线时算「还在期内」')
 })
 

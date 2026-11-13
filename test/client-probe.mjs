@@ -100,7 +100,7 @@ const cleanups = []
 const ctx = {
   effect: (fn) => { const result = fn(); if (typeof result === 'function') cleanups.push(result); return result },
   locale: { register: (ns, messages) => ({ ns, messages }), bind: () => key => key },
-  configForms: { get: id => { console.log('configForms.get:', id); return scope } },
+  configForms: { get: id => { console.log('configForms.get:', id); return scope }, whileServed: (_ids, fn) => fn() },
   slots: { inject: (_name, fn) => fn(), register: (spec, Component) => { registration = { spec, Component } } },
 }
 mod.apply(ctx)
@@ -108,10 +108,10 @@ console.log('slot:', registration.spec.name, '| key:', registration.spec.key, '|
 const injected = registration.spec.inject()
 console.log('injected keys:', Object.keys(injected).join(','))
 
-const store = injected.hooks.settingsCard
-const useSettingsCard = selector => selector(store.get())
-console.log('summary view is null:', registration.Component({ view: 'summary', t: k => k, useSettingsCard, ...injected }) === null)
-const hidden = registration.Component({ view: 'page', t: k => k, useSettingsCard, ...injected })
+const store = injected.hooks.cleanupCard
+const useCleanupCard = selector => selector(store.get())
+console.log('summary view is null:', registration.Component({ view: 'summary', t: k => k, useCleanupCard, ...injected }) === null)
+const hidden = registration.Component({ view: 'page', t: k => k, useCleanupCard, ...injected })
 console.log('page children (cleanup on):', hidden.props.children.filter(Boolean).map(c => typeof c.type === 'string' ? c.type : c.type.name).join(','))
 
 injected.edit('cleanupMaxAgeDays', '3')
@@ -122,7 +122,7 @@ console.log('after save user layer:', JSON.stringify(scope.user))
 injected.edit('autoCleanup', 'false')
 await injected.save()
 console.log('after toggle save user layer:', JSON.stringify(scope.user))
-const off = registration.Component({ view: 'page', t: k => k, useSettingsCard, ...injected })
+const off = registration.Component({ view: 'page', t: k => k, useCleanupCard, ...injected })
 console.log('page children (cleanup off):', off.props.children.filter(Boolean).map(c => typeof c.type === 'string' ? c.type : c.type.name).join(','))
 
 injected.resetField('autoCleanup')

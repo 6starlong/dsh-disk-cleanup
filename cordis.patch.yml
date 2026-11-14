@@ -7,10 +7,9 @@
 #     name: 'dsh-disk-cleanup'
 #     config:
 #       enabled: true
-#       # scratchDir: ''            # 空 = 用 <DSH_HOME>/cache/scratch
+#       # scratchDir: ''            # 留空 = 默认暂存目录并自动清理；自定义目录不清理
 #       injectShellTemp: true       # pwsh/bash 的 TMP/TEMP 指向 scratch
 #       grantProcessWrite: true     # 给 scratch 补访问控制项，让子进程也能写
-#       runtimeCache: auto          # auto / always / never
 #       promptSection: true         # 往系统提示里加一段 scratch 说明
 #       autoCleanup: true           # 启动时清理 scratch（插件页也能改）
 #       cleanupMaxAgeDays: 7        # 保留天数（插件页也能改）
@@ -22,5 +21,4 @@
         enabled: true
         injectShellTemp: true
         grantProcessWrite: true
-        runtimeCache: auto
         promptSection: true

@@ -13,8 +13,8 @@ after(() => rmSync(HOME, { recursive: true, force: true }))
 /** 本测试里的 scratch 目录。 */
 const SCRATCH = join(HOME, 'cache', 'scratch')
 
-/** 默认配置：不碰真实访问控制列表，也不建包管理器缓存目录。 */
-const SAFE = { grantProcessWrite: false, runtimeCache: 'never' }
+/** 默认配置：不碰真实访问控制列表。 */
+const SAFE = { grantProcessWrite: false }
 
 /**
  * 造一个足够真的假 ctx：记录注册了哪些工具、装了哪些 section。
@@ -122,23 +122,6 @@ test('pwsh 命令串被注入 TMP/TEMP', async () => {
   assert.ok(out.path.endsWith('Get-ChildItem'))
 })
 
-test('接管包管理器时把缓存目录也注入子进程', async () => {
-  const host = await boot({ config: { runtimeCache: 'always' } })
-  const wrapped = host.registered.find(d => d.name === 'pwsh')
-  const out = await wrapped.execute({ command: 'pnpm install' }, { agent: host.agent })
-  assert.ok(out.path.includes('npm_config_store_dir='), out.path)
-  assert.ok(out.path.includes('BUN_INSTALL_CACHE_DIR='), out.path)
-  assert.ok(out.path.includes('UV_CACHE_DIR='), out.path)
-  assert.ok(out.path.includes('npm_config_cache='), out.path)
-  assert.ok(out.path.endsWith('pnpm install'))
-})
-
-test('不接管包管理器时不注入缓存变量', async () => {
-  const host = await boot()
-  const wrapped = host.registered.find(d => d.name === 'pwsh')
-  const out = await wrapped.execute({ command: 'pnpm install' }, { agent: host.agent })
-  assert.equal(out.path.includes('npm_config_store_dir'), false, out.path)
-})
 
 test('workspace-write 下给 scratch 追加可写根', async () => {
   const host = await boot({ config: { grantProcessWrite: true } })

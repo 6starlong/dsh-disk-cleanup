@@ -1,8 +1,8 @@
 # dsh-disk-cleanup
 
-给临时文件一个专用目录：shell 命令里的临时目录与包管理器缓存默认落在工作区之外，scratch 目录在需要时补齐写权限，系统提示告诉模型临时文件该写哪里，过期的临时文件到点自动清掉。用户要保留的文件照旧留在工作区。
+给临时文件一个专用目录：shell 命令里的临时目录默认落在工作区之外，scratch 目录在需要时补齐写权限，系统提示告诉模型临时文件该写哪里，过期的临时文件到点自动清掉。用户要保留的文件照旧留在工作区。
 
-DSH 本身没有「临时文件目录」这个概念；模型写出的探针脚本、包管理器建出的依赖缓存默认都落在工作区内。这个插件提供统一的环境注入、scratch 目录授权、一段系统提示和一份过期清理，让临时文件有地方可去、也不会越攒越多。
+DSH 本身没有「临时文件目录」这个概念；模型写出的探针脚本默认都落在工作区内。这个插件提供统一的环境注入、scratch 目录授权、一段系统提示和一份过期清理，让临时文件有地方可去、也不会越攒越多。
 
 ## 它做什么
 
@@ -10,7 +10,7 @@ DSH 本身没有「临时文件目录」这个概念；模型写出的探针脚�
 
 | 机制 | 覆盖的情况 | 做法 |
 |---|---|---|
-| shell 环境注入 | 脚本内部用 `tempfile` / `[System.IO.Path]::GetTempPath()` 之类，以及 `pnpm install` / `bun install` / `uv sync` 在工作区留下缓存 | 在 `pwsh` / `bash` 命令串前设置 `TMP` / `TEMP` / `TMPDIR`，并注入包管理器缓存变量，缓存进 `<DSH_HOME>/cache/pkg/<工具>` |
+| shell 环境注入 | 脚本内部用 `tempfile` / `[System.IO.Path]::GetTempPath()` 之类 | 在 `pwsh` / `bash` 命令串前设置 `TMP` / `TEMP` / `TMPDIR`，指向 `<DSH_HOME>/cache/scratch` |
 | 权限补齐 | workspace-write 下 scratch 目录对受限子进程不可写 | 给会话注册可写根 + 给目录补访问控制项 |
 | 系统提示 | 模型不知道该往哪写 | 加一段祈使句，点明 scratch 位置、临时文件写那儿、用户文件留在工作区；路径每次构建时现算，只读会话不出这段 |
 | 过期清理 | scratch 只增不减，旧探针脚本一直留着 | 按保留天数删掉 `<DSH_HOME>/cache/scratch` 里过期的条目，插件加载时与之后定期各扫一次 |
@@ -40,39 +40,13 @@ workspace-write 下写到工作区外面要两步授权，插件在会话创建�
 只清 `<DSH_HOME>/cache/scratch`，也就是插件自己定的那个落点：
 
 - **删什么**：`cache/scratch` 下的顶层条目，最后修改时间早于「现在减保留天数」的才删；目录整个删掉，含里面的内容。
-- **不删什么**：包管理器缓存（`cache/pkg` 下的 `pnpm` / `bun` / `uv` / `npm`）一个都不碰——那是硬链接仓库，删了会让已装的项目失效。配置里自己指了 `scratchDir` 的，那个目录也不自动清，里面的东西未必可丢。
+- **不删什么**：插件只清 `<DSH_HOME>/cache/scratch`，其它目录一概不碰。配置里自己指了 `scratchDir` 的，那个目录也不自动清，里面的东西未必可丢。
 - **怎么算过期**：看条目自己的最后修改时间，不看访问时间（Windows 默认不更新访问时间）。目录里某个子文件刚被写过，目录的修改时间会一并刷新，正在用的工作目录不会被误删。
 - **何时清**：插件加载时一次，之后定期再扫，进程重启等于重新起算。
 - **单个条目删不掉**（Windows 上被别的进程占着）就跳过，不中断整批。
 
 在插件**详情页**的「过期清理」卡片里可以关掉自动清理，也可以改保留天数（1–365）：天数留空恢复默认的 7 天。
 
-## 运行时缓存
-
-启动时在 `PATH` 里找 `pnpm` / `bun` / `uv` / `npm`，按 `runtimeCache` 决定接管哪些：
-
-| 取值 | 行为 |
-|---|---|
-| `auto`（默认） | 只接管**没有现成缓存**的。用户已经有自己缓存位置的，用他自己的，不打扰 |
-| `always` | 全部接管，缓存一律进 `<DSH_HOME>/cache/pkg` |
-| `never` | 一个都不碰 |
-
-`auto` 判的是「用户有没有现成的缓存」，不是「命令在不在 PATH 上」：缓存环境变量已经设了，或者该工具的默认缓存目录已经存在，就算用户有。命令在 PATH 上但一个缓存都没有时仍然接管：插件给的位置就是它第一次写缓存的地方。
-
-接管的工具会被注入这些变量：
-
-| 工具 | 变量 | 接管后落在 | 判默认位置 |
-|---|---|---|---|
-| pnpm | `pnpm_config_store_dir` / `pnpm_config_cache_dir` / `pnpm_config_state_dir` | `cache/pkg/pnpm/{store,cache,state}` | `%LOCALAPPDATA%\pnpm\store` |
-| bun | `BUN_INSTALL_CACHE_DIR` | `cache/pkg/bun/cache` | `~/.bun/install/cache` |
-| uv | `UV_CACHE_DIR` | `cache/pkg/uv/cache` | `%LOCALAPPDATA%\uv\cache` |
-| npm | `npm_config_cache` | `cache/pkg/npm/cache` | `%LOCALAPPDATA%\npm-cache` |
-
-pnpm 的三个目录键用 `pnpm_config_*` 前缀，npm 用 `npm_config_cache`，bun 用 `BUN_INSTALL_CACHE_DIR`，uv 用 `UV_CACHE_DIR`：各工具只认自己那套，不要混用前缀（"配置键里的 `-` 写成 `_`" 这条规律只适用于 npm / pnpm 这类 npm 系配置）。命令里已经自己设过同名变量的不覆盖。
-
-你的 pnpm 版本如果不认 `pnpm_config_*`，用 `pnpm config set store-dir <路径> --global` 自己把缓存位置写进配置，`runtimeCache` 保持 `auto` 即可。
-
-项目自己的 `node_modules` 不接管——那是项目产物，属于工作区。同理，Python 项目的 `.venv`、Rust 的 `target`、各类 `__pycache__` 也一概不碰：插件只改包管理器的**全局缓存位置**，不动项目内的任何目录。
 
 ## 安装
 
@@ -80,12 +54,6 @@ pnpm 的三个目录键用 `pnpm_config_*` 前缀，npm 用 `npm_config_cache`�
 
 ```powershell
 dsh plugin --profile <profile> add dsh-disk-cleanup
-```
-
-改插件源码时也可以用本地目录，路径按自己机器换：
-
-```powershell
-dsh plugin --profile <profile> add "link:<插件目录>"
 ```
 
 安装后重启 DSH 生效。
@@ -99,10 +67,9 @@ dsh plugin --profile <profile> add "link:<插件目录>"
   name: 'dsh-disk-cleanup'
   config:
     enabled: true
-    scratchDir: ''              # 空 = 用 <DSH_HOME>/cache/scratch；自己指了就别指望自动清理
+    scratchDir: ''              # 留空 = 默认暂存目录并自动清理；自定义目录不清理
     injectShellTemp: true       # pwsh/bash 的 TMP/TEMP 指向 scratch
     grantProcessWrite: true     # 给 scratch 补访问控制项，让子进程也能写
-    runtimeCache: auto          # auto / always / never
     promptSection: true         # 往系统提示里加一段说明
     autoCleanup: true           # 启动时清掉过期的临时文件（插件页也能改）
     cleanupMaxAgeDays: 7        # 保留天数，1–365（插件页也能改）
@@ -144,7 +111,3 @@ node scripts/build.mjs
 - 挂载后会话一建立就会建 scratch 目录（`agent/created` 时一次性建好），不等第一次写文件。
 - `sandbox_permissions` / `justification` 原样透传，权限升级链路不断。
 - 客户端半边注册失败（比如宿主没有槽位服务）只影响插件页的卡片，shell 注入、授权与清理照常。
-
-## 不做的事
-
-`attachments` 与派生图片缓存的回收、会话归档触发的清理、包管理器缓存的体积上限。DSH 的图片缓存目前不会自动删除，处理它属于另一件事。

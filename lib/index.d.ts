@@ -1,7 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
 
-/** runtimeCache 的合法取值。 */
-export type RuntimeCachePolicy = 'auto' | 'always' | 'never'
 
 /** 插件配置（与 `cordis.patch.yml` 里的 config 一致，全部可省略）。 */
 export interface Config {
@@ -13,8 +11,6 @@ export interface Config {
   injectShellTemp?: boolean
   /** Windows 上给 scratch 补访问控制项，让受限子进程也能写。默认 true。 */
   grantProcessWrite?: boolean
-  /** 包管理器缓存接管策略。默认 'auto'。 */
-  runtimeCache?: RuntimeCachePolicy
   /** 往系统提示里加一段说明。默认 true。 */
   promptSection?: boolean
   /** 启动时清掉 scratch 里过期的临时文件。默认 true。 */

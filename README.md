@@ -13,7 +13,7 @@ DSH 本身没有「临时文件目录」这个概念；模型写出的探针脚�
 | shell 环境注入 | 脚本内部用 `tempfile` / `[System.IO.Path]::GetTempPath()` 之类 | 在 `pwsh` / `bash` 命令串前设置 `TMP` / `TEMP` / `TMPDIR`，指向 `<DSH_HOME>/cache/scratch` |
 | 权限补齐 | workspace-write 下 scratch 目录对受限子进程不可写 | 给会话注册可写根 + 给目录补访问控制项 |
 | 系统提示 | 模型不知道该往哪写 | 加一段祈使句，点明 scratch 位置、临时文件写那儿、用户文件留在工作区；路径每次构建时现算，只读会话不出这段 |
-| 过期清理 | scratch 只增不减，旧探针脚本一直留着 | 按保留天数删掉 `<DSH_HOME>/cache/scratch` 里过期的条目，插件加载时与之后定期各扫一次 |
+| 过期清理 | scratch 只增不减，旧探针脚本一直留着 | 按保留天数删掉 `<DSH_HOME>/cache/scratch` 里过期的条目，并清掉残留的空目录，插件加载时与之后定期各扫一次 |
 
 不改写任何工具入参的路径：模型给什么路径就写什么路径。要不要把临时文件放进 scratch 由提示词引导，不由插件替模型决定。
 
@@ -37,10 +37,11 @@ workspace-write 下写到工作区外面要两步授权，插件在会话创建�
 
 ## 过期清理
 
-只清 `<DSH_HOME>/cache/scratch`，也就是插件自己定的那个落点：
+清 `<DSH_HOME>/cache/scratch` 里的过期条目与空目录，另外删 `<DSH_HOME>` 下一级的空目录：
 
 - **删什么**：`cache/scratch` 下的顶层条目，最后修改时间早于「现在减保留天数」的才删；目录整个删掉，含里面的内容。
-- **不删什么**：插件只清 `<DSH_HOME>/cache/scratch`，其它目录一概不碰。配置里自己指了 `scratchDir` 的，那个目录也不自动清，里面的东西未必可丢。
+- **空目录**：`cache/scratch` 里自底向上删空目录（父目录因此变空也一并删），另外删 `<DSH_HOME>` 下一级的空目录；都只删没有任何条目的目录。
+- **不删什么**：只处理 `<DSH_HOME>/cache/scratch` 与 `<DSH_HOME>` 下一级的空目录，不往其它子目录里递归；配置里自己指了 `scratchDir` 的，那个目录也不自动清，里面的东西未必可丢。
 - **怎么算过期**：看条目自己的最后修改时间，不看访问时间（Windows 默认不更新访问时间）。目录里某个子文件刚被写过，目录的修改时间会一并刷新，正在用的工作目录不会被误删。
 - **何时清**：插件加载时一次，之后定期再扫，进程重启等于重新起算。
 - **单个条目删不掉**（Windows 上被别的进程占着）就跳过，不中断整批。
@@ -82,7 +83,7 @@ node --test "test/*.test.mjs"
 node test/e2e-shell.mjs
 ```
 
-- `plugin` / `scratch` / `cleanup`：插件装配、纯函数与目录清理，覆盖 shell 包装、环境变量注入、可写根登记、提示词 section、过期判定与节流。
+- `plugin` / `scratch` / `cleanup`：插件装配、纯函数与目录清理，覆盖 shell 包装、环境变量注入、可写根登记、提示词 section、过期判定、空目录清理与节流。
 - `e2e-shell`：生成的前缀真的交给 pwsh 执行，确认 TMP/TEMP 落到 scratch。
 - `schema-probe`：核对 `Config` 能被真的 schemastery 构建，且默认值与实际生效的一致；要在装了本插件的 profile 目录里跑。
 - `client-probe`：核对客户端产物 `lib/client.js` 能注册到插件页槽位、保存时写哪几个字段。

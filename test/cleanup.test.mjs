@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { cleanScratch, cutoffTime, throttled } from '../lib/cleanup.js'
+import { cleanEmptyDirs, cleanScratch, cutoffTime, throttled } from '../lib/cleanup.js'
 
 const ROOT = mkdtempSync(join(tmpdir(), 'dsh-disk-cleanup-clean-'))
 after(() => rmSync(ROOT, { recursive: true, force: true }))
@@ -109,4 +109,32 @@ test('throttled 执行中重入直接跳过', async () => {
   assert.equal(second, false)
   assert.equal(await first, true)
   assert.equal(count, 1)
+})
+
+test('递归删空目录：空的自底向上删，非空的留着，根不删', async () => {
+  const dir = join(ROOT, 'empty-deep')
+  mkdirSync(join(dir, 'a', 'b'), { recursive: true })
+  mkdirSync(join(dir, 'keep'), { recursive: true })
+  writeFileSync(join(dir, 'keep', 'probe.mjs'), 'x')
+  mkdirSync(join(dir, 'lonely'), { recursive: true })
+  const result = await cleanEmptyDirs({ dir, recursive: true })
+  assert.deepEqual(result, { removed: 3, failed: 0, kept: 1 })
+  assert.deepEqual(readdirSync(dir), ['keep'])
+})
+
+test('不递归时只删一级空目录，深层空目录不动', async () => {
+  const dir = join(ROOT, 'empty-shallow')
+  mkdirSync(join(dir, 'nested', 'inner'), { recursive: true })
+  mkdirSync(join(dir, 'top-empty'), { recursive: true })
+  const result = await cleanEmptyDirs({ dir })
+  assert.deepEqual(result, { removed: 1, failed: 0, kept: 1 })
+  assert.deepEqual(readdirSync(dir), ['nested'])
+})
+
+test('空目录清理支持 dryRun 与目录不存在', async () => {
+  const dir = join(ROOT, 'empty-dry')
+  mkdirSync(join(dir, 'blank'), { recursive: true })
+  assert.equal((await cleanEmptyDirs({ dir, dryRun: true })).removed, 1)
+  assert.deepEqual(readdirSync(dir), ['blank'])
+  assert.deepEqual(await cleanEmptyDirs({ dir: join(ROOT, 'no-such-empty') }), { removed: 0, failed: 0, kept: 0 })
 })

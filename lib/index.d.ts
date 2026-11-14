@@ -13,7 +13,7 @@ export interface Config {
   grantProcessWrite?: boolean
   /** 往系统提示里加一段说明。默认 true。 */
   promptSection?: boolean
-  /** 启动时清掉 scratch 里过期的临时文件。默认 true。 */
+  /** 启动时清掉过期的临时文件与残留的空目录。默认 true。 */
   autoCleanup?: boolean
   /** 保留天数，范围 1–365。默认 7。 */
   cleanupMaxAgeDays?: number

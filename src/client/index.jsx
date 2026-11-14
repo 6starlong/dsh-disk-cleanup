@@ -37,9 +37,9 @@ const STYLE = {
 const MESSAGES = {
   zh: {
     title: '过期清理',
-    description: '清理 scratch 目录里超过保留天数没改动过的临时文件。',
-    on: '开启后按保留天数自动清理 scratch 目录里过期的临时文件。',
-    off: '关闭后不再自动清理，临时文件会一直留着。',
+    description: '自动清理 scratch 里过期的临时文件与残留的空目录。',
+    on: '开启后自动清理过期的临时文件与残留的空目录。',
+    off: '关闭后不再自动清理。',
     maxAge: '保留天数',
     maxAgeHint: 'scratch 里超过这么多天没改动过的条目会被删除。',
     invalid: '请填一个正整数，或留空使用默认值。',

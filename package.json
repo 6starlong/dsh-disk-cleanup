@@ -1,6 +1,6 @@
 {
   "name": "dsh-disk-cleanup",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "为 shell 命令注入临时目录与依赖缓存变量，给 scratch 目录补齐写权限，在系统提示里点明临时文件该写哪里，并清理过期的临时文件。",
   "type": "module",
   "main": "lib/index.js",
@@ -14,16 +14,30 @@
       "default": "./lib/client.js"
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
   },
   "files": [
     "lib",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "locale/*.json",
+    "icon.svg"
   ],
   "publishConfig": {
-    "registry": "https://registry.npmjs.org/"
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/6starlong/dsh-disk-cleanup.git"
+  },
+  "homepage": "https://github.com/6starlong/dsh-disk-cleanup#readme",
+  "bugs": {
+    "url": "https://github.com/6starlong/dsh-disk-cleanup/issues"
+  },
+  "icon": "./icon.svg",
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "node --test \"test/*.test.mjs\"",

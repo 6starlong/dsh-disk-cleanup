@@ -12,7 +12,7 @@
 #       grantProcessWrite: true     # 给 scratch 补访问控制项，让子进程也能写
 #       promptSection: true         # 往系统提示里加一段 scratch 说明
 #       autoCleanup: true           # 启动时清理 scratch（插件页也能改）
-#       cleanupMaxAgeDays: 7        # 保留天数（插件页也能改）
+#       cleanupMaxAgeDays: 3        # 保留天数（插件页也能改）
 #
 - insert:
     - id: dsh-disk-cleanup

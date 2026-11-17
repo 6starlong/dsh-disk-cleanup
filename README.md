@@ -46,7 +46,7 @@ workspace-write 下写到工作区外面要两步授权，插件在会话创建�
 - **何时清**：插件加载时一次，之后定期再扫，进程重启等于重新起算。
 - **单个条目删不掉**（Windows 上被别的进程占着）就跳过，不中断整批。
 
-在插件**详情页**的「过期清理」卡片里可以关掉自动清理，也可以改保留天数（1–365）：天数留空恢复默认的 7 天。
+在插件**详情页**的「过期清理」卡片里可以关掉自动清理，也可以改保留天数（1–365）：天数留空恢复默认的 3 天。
 
 
 ## 安装
@@ -73,7 +73,7 @@ dsh plugin --profile <profile> add dsh-disk-cleanup
     grantProcessWrite: true     # 给 scratch 补访问控制项，让子进程也能写
     promptSection: true         # 往系统提示里加一段说明
     autoCleanup: true           # 启动时清掉过期的临时文件（插件页也能改）
-    cleanupMaxAgeDays: 7        # 保留天数，1–365（插件页也能改）
+    cleanupMaxAgeDays: 3        # 保留天数，1–365（插件页也能改）
 ```
 
 ## 测试

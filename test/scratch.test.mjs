@@ -111,13 +111,13 @@ test('resolveConfig 用默认值补齐并拒绝错类型', () => {
 })
 
 test('resolveConfig 把保留天数夹到合法范围', () => {
-  assert.equal(resolveConfig(undefined).cleanupMaxAgeDays, 7)
+  assert.equal(resolveConfig(undefined).cleanupMaxAgeDays, 3)
   assert.equal(resolveConfig({ cleanupMaxAgeDays: 0 }).cleanupMaxAgeDays, 1)
   assert.equal(resolveConfig({ cleanupMaxAgeDays: 9999 }).cleanupMaxAgeDays, 365)
   assert.equal(resolveConfig({ cleanupMaxAgeDays: 3.6 }).cleanupMaxAgeDays, 4)
   // 手写 YAML 里的 "7" 与设置页写回的 7 一样管用。
   assert.equal(resolveConfig({ cleanupMaxAgeDays: '7' }).cleanupMaxAgeDays, 7)
   assert.equal(resolveConfig({ cleanupMaxAgeDays: ' 30 ' }).cleanupMaxAgeDays, 30)
-  assert.equal(resolveConfig({ cleanupMaxAgeDays: 'abc' }).cleanupMaxAgeDays, 7)
+  assert.equal(resolveConfig({ cleanupMaxAgeDays: 'abc' }).cleanupMaxAgeDays, 3)
   assert.equal(resolveConfig({ autoCleanup: 'yes' }).autoCleanup, true)
 })

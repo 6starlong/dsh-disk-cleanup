@@ -13,9 +13,9 @@ export interface Config {
   grantProcessWrite?: boolean
   /** 往系统提示里加一段说明。默认 true。 */
   promptSection?: boolean
-  /** 启动时清掉过期的临时文件与残留的空目录。默认 true。 */
+  /** 加载时与之后定期清掉过期临时文件、请求图片缓存、零引用原件与残留空目录。默认 true。 */
   autoCleanup?: boolean
-  /** 保留天数，范围 1–365。默认 3。 */
+  /** 保留天数，范围 1–365。临时文件和图片缓存，超过这个天数没改动就清掉；原始图片只有确认没有引用时才会删。默认 3。 */
   cleanupMaxAgeDays?: number
 }
 

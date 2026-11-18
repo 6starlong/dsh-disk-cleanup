@@ -96,7 +96,6 @@ node test/e2e-shell.mjs
 - `plugin` / `scratch` / `cleanup`：插件装配、纯函数与目录清理，覆盖 shell 包装、环境变量注入、可写根登记、提示词 section、过期判定、空目录清理与节流。
 - `attachments`：多帧会话逐帧解压提取引用、请求图片缓存过期清理、零引用原件清理、首轮只统计、读不全或零引用时整批跳过。
 - `e2e-shell`：生成的前缀真的交给 pwsh 执行，确认 TMP/TEMP 落到 scratch。
-- `schema-probe`：核对 `Config` 能被真的 schemastery 构建，且默认值与实际生效的一致；要在装了本插件的 profile 目录里跑。
 - `client-probe`：核对客户端产物 `lib/client.js` 能注册到插件页槽位、保存时写哪几个字段。
 
 改 `src/client/index.jsx` 之后要重新生成 `lib/client.js`：
@@ -119,5 +118,6 @@ node scripts/build.mjs
 - 非 Windows：不补访问控制项，仅 workspace-write 退到工作区。
 - 工具被关掉就跳过，原 `execute` 抛错原样透传，`run_code` 不覆盖。
 - 可写模式下 `agent/created` 即建 scratch，read-only 不建。
+- 只清 scratch；系统临时目录（`%LOCALAPPDATA%\Temp`）里 DSH 自建的 `dsh-*` 不接管、不清理。
 - `sandbox_permissions` / `justification` 原样透传。
 - 客户端注册失败只影响插件页卡片，其余照常。

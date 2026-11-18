@@ -23,6 +23,7 @@ const SAFE = { grantProcessWrite: false }
  */
 function fakeHost(options = {}) {
   const mode = options.mode ?? 'workspace-write'
+  const workspaceRoot = options.workspaceRoot ?? 'C:\\ws'
   const globals = new Map()
   const registered = []
   const sections = []
@@ -42,13 +43,18 @@ function fakeHost(options = {}) {
   for (const n of ['pwsh', 'bash']) globals.set(n, makeTool(n))
 
   const sandboxPolicy = {
-    resolve: () => ({ mode, workspaceRoot: 'C:\\ws' }),
+    resolve: () => ({ mode, workspaceRoot }),
     registerWritableRoot: (session, dir) => { writableRoots.push(dir); return () => {} },
   }
 
+  // 记录每次查工具时传的作用域，用来断言没漏掉 agent。
+  const scopeChecks = []
+  // lateAgents 下攒起来、等服务就绪后才执行的 inject 回调。
+  const deferred = []
+
   const ctx = {
     tools: {
-      get: (n) => globals.get(n),
+      get: (n, scope) => { scopeChecks.push({ n, scope }); return globals.get(n) },
       register: (def) => { registered.push(def); return () => {} },
     },
     agents: { list: () => agents },
@@ -56,10 +62,16 @@ function fakeHost(options = {}) {
     inject: (names, fn) => {
       const child = {
         sandboxPolicy,
+        agents: { list: () => agents },
+        // 真实宿主里插件可能比 agents 服务先加载；lateAgents 模拟这一段空窗期。
         systemPrompt: {
           getSectionOrder: () => 1200,
           section: (s) => { sections.push(s); return () => {} },
         },
+      }
+      if (options.lateAgents === true && Array.isArray(names) && names.includes('agents')) {
+        deferred.push(() => fn(child))
+        return () => {}
       }
       fn(child)
       return () => {}
@@ -71,6 +83,7 @@ function fakeHost(options = {}) {
   }
   /** 真实 cordis 的 agent 上下文要先 inject 才能读 ctx.tools，这里照样模拟。 */
   const agentTools = {
+    get: (n, scope) => { scopeChecks.push({ n, scope }); return globals.get(n) },
     register: (def) => {
       registered.push(def)
       // 真实 ToolsService 注册后会发 tools/change；这里照样发，才能覆盖重入路径。
@@ -81,9 +94,14 @@ function fakeHost(options = {}) {
   const makeAgentCtx = () => ({
     inject: (names, fn) => { fn({ tools: agentTools }); return () => {} },
   })
-  const agent = { ctx: makeAgentCtx(), session: { header: { cwd: 'C:\\ws' } } }
+  const agent = { ctx: makeAgentCtx(), session: { header: { cwd: workspaceRoot } } }
   agents.push(agent)
-  return { ctx, registered, sections, agent, globals, makeAgentCtx, writableRoots, config: { ...SAFE, ...options.config } }
+  /** 模拟 agents 服务就绪：补上服务并把攒下的 inject 回调跑掉。 */
+  const releaseAgents = () => {
+    ctx.agents = { list: () => agents }
+    for (const run of deferred.splice(0)) run()
+  }
+  return { ctx, registered, sections, agent, globals, makeAgentCtx, writableRoots, scopeChecks, releaseAgents, config: { ...SAFE, ...options.config } }
 }
 
 /** 装好插件并等一轮微任务，让 install 跑完。 */
@@ -315,4 +333,11 @@ test('自己指定了 scratchDir 时不去动那个目录', async () => {
     rmSync(home, { recursive: true, force: true })
     rmSync(custom, { recursive: true, force: true })
   }
+})
+
+test('查 shell 工具时带上 agent 作用域', async () => {
+  const host = await boot()
+  const forShell = host.scopeChecks.filter(c => c.n === 'pwsh' || c.n === 'bash')
+  assert.ok(forShell.length >= 2, '两个工具各查一次，实际查了 ' + host.scopeChecks.length + ' 次')
+  assert.ok(forShell.every(c => c.scope === host.agent), '作用域必须是当前 agent')
 })
